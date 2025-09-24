@@ -1,19 +1,52 @@
 #!/usr/bin/env python3
 """
 Hitachi Hiverter Si-1.1K-H3 Modbus TCP Client with AWS IoT Core MQTT Publishing
+Includes Raspberry Pi Wi-Fi connection using SSID + PASSWORD.
 """
 
 import time
 import json
 import ssl
 import logging
+import subprocess
 from pymodbus.client.sync import ModbusTcpClient
 from paho.mqtt import client as mqtt_client
 
-# Configure logging
+# ---------------- Logging Setup ---------------- #
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(_name_)
 
+# ---------------- Wi-Fi Setup ---------------- #
+def connect_wifi(ssid, password):
+    """
+    Connect Raspberry Pi to Wi-Fi using nmcli.
+    """
+    try:
+        # Delete old connection if exists
+        subprocess.run(
+            ["nmcli", "con", "delete", ssid],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        # Connect to Wi-Fi
+        result = subprocess.run(
+            ["nmcli", "dev", "wifi", "connect", ssid, "password", password],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            logger.info(f"✅ Connected to Wi-Fi SSID: {ssid}")
+            return True
+        else:
+            logger.error(f"❌ Failed to connect Wi-Fi: {result.stderr}")
+            return False
+    except Exception as e:
+        logger.error(f"⚠ Wi-Fi connection error: {e}")
+        return False
+
+# ---------------- Inverter Modbus Client ---------------- #
 class HitachiInverterClient:
     def _init_(self, ip_address, port=502, unit_id=1):
         self.ip_address = ip_address
@@ -111,7 +144,6 @@ class HitachiInverterClient:
         }
 
 # ---------------- AWS IoT Core MQTT Setup ---------------- #
-
 def create_mqtt_client(client_id, endpoint, cert_path, key_path, root_ca_path):
     client = mqtt_client.Client(client_id)
     client.tls_set(
@@ -124,7 +156,16 @@ def create_mqtt_client(client_id, endpoint, cert_path, key_path, root_ca_path):
     client.connect(endpoint, 8883, 60)
     return client
 
+# ---------------- Main ---------------- #
 def main():
+    # Wi-Fi config
+    WIFI_SSID = "YourSSID"
+    WIFI_PASSWORD = "YourPassword"
+    
+    if not connect_wifi(WIFI_SSID, WIFI_PASSWORD):
+        logger.error("Could not establish Wi-Fi connection. Exiting.")
+        return
+
     # Inverter config
     INVERTER_IP = "192.168.1.100"
     
@@ -136,7 +177,6 @@ def main():
     KEY_PATH = "cert/private.pem.key"
     ROOT_CA_PATH = "cert/RootCA.pem"
     
-    # Polling
     POLL_INTERVAL = 10  # seconds
     
     inverter = HitachiInverterClient(INVERTER_IP)
@@ -152,11 +192,9 @@ def main():
             data = inverter.collect_all_data()
             payload = json.dumps(data)
             
-            # Print locally
             print(f"\n--- Inverter Data ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---")
             print(payload)
             
-            # Publish to AWS IoT Core
             mqttc.publish(TOPIC, payload, qos=1)
             logger.info(f"Published data to AWS IoT topic {TOPIC}")
             
