@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Hitachi Hiverter Si-1.1K-H3 Modbus TCP Client
-With AWS IoT Core integration (MQTT publishing every 10s)
+Hitachi Hiverter Si-1.1K-H3 Modbus TCP Client with AWS IoT Core MQTT Publishing
 """
 
 import time
 import json
+import ssl
 import logging
 from pymodbus.client.sync import ModbusTcpClient
-from awscrt import io, mqtt, auth, http
-from awsiot import mqtt_connection_builder
+from paho.mqtt import client as mqtt_client
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -87,7 +86,6 @@ class HitachiInverterClient:
                 pv_data[param] = value
             else:
                 pv_data[param] = None
-                
         return pv_data
     
     def get_system_status(self):
@@ -97,14 +95,12 @@ class HitachiInverterClient:
             'fault_code': (40101, 1),
             'warning_code': (40102, 1),
         }
-        
         for param, (address, count) in status_registers.items():
             registers = self.read_registers(address - 1, count)
             if registers is not None:
                 status_data[param] = registers[0] if count == 1 else registers
             else:
                 status_data[param] = None
-                
         return status_data
     
     def collect_all_data(self):
@@ -114,72 +110,62 @@ class HitachiInverterClient:
             'system_status': self.get_system_status(),
         }
 
+# ---------------- AWS IoT Core MQTT Setup ---------------- #
+
+def create_mqtt_client(client_id, endpoint, cert_path, key_path, root_ca_path):
+    client = mqtt_client.Client(client_id)
+    client.tls_set(
+        ca_certs=root_ca_path,
+        certfile=cert_path,
+        keyfile=key_path,
+        tls_version=ssl.PROTOCOL_TLSv1_2,
+    )
+    client.tls_insecure_set(False)
+    client.connect(endpoint, 8883, 60)
+    return client
 
 def main():
     # Inverter config
     INVERTER_IP = "192.168.1.100"
-    POLL_INTERVAL = 10  # seconds
-
-    # AWS IoT config - replace with your endpoint & certs
-    ENDPOINT = "YOUR_ENDPOINT_HERE-ats.iot.YOUR_REGION.amazonaws.com"
-    CLIENT_ID = "hitachi_inverter_client"
-    PATH_TO_CERT = "certs/device-certificate.pem.crt"
-    PATH_TO_KEY = "certs/private.pem.key"
-    PATH_TO_ROOT = "certs/AmazonRootCA1.pem"
-    TOPIC = "inverter/data"
-
-    # Setup AWS IoT MQTT connection
-    event_loop_group = io.EventLoopGroup(1)
-    host_resolver = io.DefaultHostResolver(event_loop_group)
-    client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
-
-    mqtt_connection = mqtt_connection_builder.mtls_from_path(
-        endpoint=ENDPOINT,
-        cert_filepath=PATH_TO_CERT,
-        pri_key_filepath=PATH_TO_KEY,
-        client_bootstrap=client_bootstrap,
-        ca_filepath=PATH_TO_ROOT,
-        client_id=CLIENT_ID,
-        clean_session=False,
-        keep_alive_secs=30,
-    )
-
-    logger.info(f"Connecting to AWS IoT Core at {ENDPOINT}...")
-    connect_future = mqtt_connection.connect()
-    connect_future.result()
-    logger.info("Connected to AWS IoT Core")
-
-    # Create inverter client
-    inverter = HitachiInverterClient(INVERTER_IP)
     
+    # AWS IoT config
+    AWS_ENDPOINT = "your-aws-iot-endpoint.amazonaws.com"
+    CLIENT_ID = "HitachiInverterClient"
+    TOPIC = "hitachi/inverter/data"
+    CERT_PATH = "certs/deviceCert.pem.crt"
+    KEY_PATH = "certs/private.pem.key"
+    ROOT_CA_PATH = "certs/AmazonRootCA1.pem"
+    
+    # Polling
+    POLL_INTERVAL = 10  # seconds
+    
+    inverter = HitachiInverterClient(INVERTER_IP)
     if not inverter.connect():
         logger.error("Failed to connect to inverter. Exiting.")
         return
     
+    mqttc = create_mqtt_client(CLIENT_ID, AWS_ENDPOINT, CERT_PATH, KEY_PATH, ROOT_CA_PATH)
+    logger.info("Connected to AWS IoT Core")
+    
     try:
         while True:
             data = inverter.collect_all_data()
-
-            # Publish to AWS IoT
-            message_json = json.dumps(data)
-            logger.info(f"Publishing data to {TOPIC}: {message_json}")
-            mqtt_connection.publish(
-                topic=TOPIC,
-                payload=message_json,
-                qos=mqtt.QoS.AT_LEAST_ONCE,
-            )
-
+            payload = json.dumps(data)
+            
+            # Print locally
+            print(f"\n--- Inverter Data ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---")
+            print(payload)
+            
+            # Publish to AWS IoT Core
+            mqttc.publish(TOPIC, payload, qos=1)
+            logger.info(f"Published data to AWS IoT topic {TOPIC}")
+            
             time.sleep(POLL_INTERVAL)
-
     except KeyboardInterrupt:
         logger.info("Shutting down...")
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
     finally:
         inverter.disconnect()
-        mqtt_connection.disconnect().result()
-        logger.info("Disconnected from AWS IoT Core")
-
+        mqttc.disconnect()
 
 if __name__ == "__main__":
     main()
