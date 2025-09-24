@@ -12,10 +12,10 @@ from paho.mqtt import client as mqtt_client
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_name_)
 
 class HitachiInverterClient:
-    def __init__(self, ip_address, port=502, unit_id=1):
+    def _init_(self, ip_address, port=502, unit_id=1):
         self.ip_address = ip_address
         self.port = port
         self.unit_id = unit_id
@@ -129,12 +129,12 @@ def main():
     INVERTER_IP = "192.168.1.100"
     
     # AWS IoT config
-    AWS_ENDPOINT = "your-aws-iot-endpoint.amazonaws.com"
-    CLIENT_ID = "HitachiInverterClient"
-    TOPIC = "hitachi/inverter/data"
-    CERT_PATH = "certs/deviceCert.pem.crt"
-    KEY_PATH = "certs/private.pem.key"
-    ROOT_CA_PATH = "certs/AmazonRootCA1.pem"
+    AWS_ENDPOINT = "a209vpgon02vvn-ats.iot.ap-south-1.amazonaws.com"
+    CLIENT_ID = "MySolarThing"
+    TOPIC = "solar_power_data/topic"
+    CERT_PATH = "cert/certificate.pem.crt"
+    KEY_PATH = "cert/private.pem.key"
+    ROOT_CA_PATH = "cert/RootCA.pem"
     
     # Polling
     POLL_INTERVAL = 10  # seconds
@@ -167,5 +167,5 @@ def main():
         inverter.disconnect()
         mqttc.disconnect()
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
