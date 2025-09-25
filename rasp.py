@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 Hitachi Inverter RS485 Modbus RTU Client with AWS IoT Core MQTT Publishing
 Using Raspberry Pi UART + MAX485 Module
